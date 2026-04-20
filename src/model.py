@@ -50,4 +50,17 @@ class LSTModel:
         out = self.fc(out)
         return out
     
+    def build_model(input_size = 1,
+                    hidden_size = 64,
+                    num_layers = 2,
+                    dropout = 0.2):
+        """Creates and returns a LSTMModel"""
+        model = LSTModel(
+            input_size = input_size
+            hidden_size = hidden_size,
+            num_layers = num_layers,
+            dropout = dropout
+        )
+        return model
+    
     
