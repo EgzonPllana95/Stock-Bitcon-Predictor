@@ -56,11 +56,10 @@ class LSTModel:
                     dropout = 0.2):
         """Creates and returns a LSTMModel"""
         model = LSTModel(
-            input_size = input_size
+            input_size = input_size,
             hidden_size = hidden_size,
             num_layers = num_layers,
             dropout = dropout
         )
         return model
-    
     
