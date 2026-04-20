@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-class LSTModel:
+class LSTMModel(nn.Module):
     """Model that will predict stock prize"""
     def __init__(self,
                  input_size = 1,
@@ -10,7 +10,7 @@ class LSTModel:
                  dropout = 0.2):
         #Always most be called apon får Pytorch models
         #It initislisersnn.Module tat keeps tracks of all parameters
-        super(LSTModel, self).__init__()
+        super(LSTMModel, self).__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         #Heart of the model
@@ -50,16 +50,29 @@ class LSTModel:
         out = self.fc(out)
         return out
     
-    def build_model(input_size = 1,
-                    hidden_size = 64,
-                    num_layers = 2,
-                    dropout = 0.2):
-        """Creates and returns a LSTMModel"""
-        model = LSTModel(
-            input_size = input_size,
-            hidden_size = hidden_size,
-            num_layers = num_layers,
-            dropout = dropout
+def build_model(input_size = 1,
+                hidden_size = 64,
+                num_layers = 2,
+                dropout = 0.2):
+    """Creates and returns a LSTMModel"""
+    model = LSTMModel(
+        input_size = input_size,
+        hidden_size = hidden_size,
+        num_layers = num_layers,
+        dropout = dropout
         )
-        return model
+    return model
     
+if __name__ == "__main__":
+
+    model = build_model()
+    print(model)
+    print()
+
+    #Simulation batch (secvens, days, feature)
+    dummy_input = torch.randn(32, 60, 1)
+    output = model(dummy_input)
+
+    print(f"Input shape: {dummy_input.shape}")
+    print(f"Output shape: {output.shape}")
+    print("Model is working")
