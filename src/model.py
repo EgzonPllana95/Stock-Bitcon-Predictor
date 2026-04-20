@@ -29,4 +29,25 @@ class LSTModel:
         #Linear prediction
         self.fc = nn.Linear(hidden_size, 1)
 
+    def forward(self, x):
+        """
+        Defains how the data flows thorugh the model
+        Pytorch will automatically call when output = model(x)
+        """
+        #Need initial memory state since LSTM requiers that, start both at 0
+        batch_size = x.size(0)
+        #Short term memory
+        h0 = torch.zeros(self.num_layers, batch_size, self.hidden_size).to(x.device)
+        #Long term memory
+        c0 = torch.zeros(self.num_layers, batch_size, self.hidden_size).to(x.device)
+        #All hidden layers for each time step ( btach, seq_length, hidden_size)
+        lstm_out, _ = self.lstm(x, (h0, c0))
+        #Last timestep is taken and the model "thinks" after seeing all 60 days
+        last_output = lstm_out[:, -1, :]
+        #Applies dropout
+        out = self.dropout(last_output)
+        #Fully connected layers to predtion
+        out = self.fc(out)
+        return out
+    
     
