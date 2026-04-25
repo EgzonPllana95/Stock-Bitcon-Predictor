@@ -57,10 +57,10 @@ class Trainer:
         """Prepares stock data and creates train/validations sets"""
         #Uses Dataloader class för fetch, sacle and create sequences
         loader = DataLoader(
-            ticker=self.ticker,
-            start_date=self.start_date,
-            end_date=self.end_date,
-            sequence_length=self.sequence_length
+            ticker = self.ticker,
+            start_date = self.start_date,
+            end_date = self.end_date,
+            sequence_length = self.sequence_length
         )
         X, y = loader.run()
         #Saves the scaler for later perpess
@@ -81,3 +81,19 @@ class Trainer:
         self.X_val = X_val
         self.y_val = y_val
         print(f"Train: {len(X_train)} sequences | Val: {len(X_val)} sequences")
+    
+    def build(self):
+        """Builds the LSTM model, loss function, and optimizer."""
+        self.model = build_model(
+            input_size = 1,
+            hidden_size = self.hidden_size,
+            num_layers = self.num_layers,
+            dropout = self.dropout
+        ).to(self.device)
+        #MSE Mean Squared Error losses
+        self.criterion = nn.MSELoss()
+        #Using Adam as our optimizer, default choice
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learning_rate)
+        print(self.model)
+
+    
