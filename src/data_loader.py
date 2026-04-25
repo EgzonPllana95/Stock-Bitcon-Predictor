@@ -56,4 +56,21 @@ class DataLoader:
         print(f"Donloaded {len(df)} days of data")
         return df
     
+    def scale_prices(self):
+        """
+        Scales closing prices to a [0, 1] range
+        Neural networks train better with small, consistent numbers
+        Raw prices like $150 make training unstable.
+        """
+
+        #Makes sure that we fetch the data first
+        if self.raw_data is None:
+            raise RuntimeError("Call fetch() before scale_prices()!")
+        #Reshaping to 2d since MinMaxScaler requiers 2D input
+        prices = self.raw_data["Close"].values.reshape(-1, 1)
+        #Using MinMaxScaler to scale the prices from yf data
+        self.scaler = MinMaxScaler(feature_range = (0, 1))
+        self.scale_prices = self.scaler.fit_transform(prices)
+        return self.scaled_prices
+    
     
