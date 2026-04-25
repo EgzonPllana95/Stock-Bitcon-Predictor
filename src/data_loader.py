@@ -25,7 +25,7 @@ class DataLoader:
         """
         #Uses todays date if a end_date is not given
         if end_date is None:
-            end_date = datetime.today().strftime("%Y-%m-&d")
+            end_date = datetime.today().strftime("%Y-%m-%d")
         self.ticker = ticker
         self.start_date = start_date
         self.end_date = end_date
@@ -70,7 +70,7 @@ class DataLoader:
         prices = self.raw_data["Close"].values.reshape(-1, 1)
         #Using MinMaxScaler to scale the prices from yf data
         self.scaler = MinMaxScaler(feature_range = (0, 1))
-        self.scale_prices = self.scaler.fit_transform(prices)
+        self.scaled_prices = self.scaler.fit_transform(prices)
         return self.scaled_prices
     
     def create_sequences(self):
@@ -84,14 +84,35 @@ class DataLoader:
             raise RuntimeError("Call scale_prices() before create_sequences().")
         X, y = list(), list()
         #Slides a window across the data that starts att sequences_length
-        for i in range(self.sequence_length, len(self.scale_prices)):
+        for i in range(self.sequence_length, len(self.scaled_prices)):
             #Takes previous 60 days
-            X.append(self.scaled_prices[i - self.sequence_length])
+            X.append(self.scaled_prices[i - self.sequence_length:i])
             #Targeted one is the price on day [i], after the window
             y.append(self.scaled_prices[i])
         #Convertingthe X, y to arrays, needed for Pytorch
         X = np.array(X)
         y = np.array(y)
         print(f"Created {len(X)} sequences of length {self.sequence_length}")
+        return X, y
     
-    
+    def run(self):
+        """
+        Convenience method:
+            - fetches
+            - scales
+            - creates sequanes in one call
+        """
+        self.fetch()
+        self.scale_prices()
+        return self.create_sequences()
+
+if __name__ == "__main__":
+    loader = DataLoader(ticker="AAPL", start_date="2020-01-01", sequence_length=60)
+    # Run the full pipeline
+    X, y = loader.run()
+    print("\n--- Result ---")
+    print(f"X shape: {X.shape}")
+    print(f"y shape: {y.shape}")
+    print(f"\nFirst sequence (first 5 days):")
+    print(X[0][:5].flatten())
+    print(f"Target for first sequence: {y[0][0]:.4f}")
