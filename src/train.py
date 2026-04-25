@@ -96,4 +96,78 @@ class Trainer:
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learning_rate)
         print(self.model)
 
-    
+    def train_one_epoch(self):
+        """Runs one full pass over the training data and returns the average loss."""
+        #Enables dropout
+        self.model.train()
+        running_loss = 0.0
+        for batch_X, batch_y in self.train_loader:
+            #Reset gradients from the previous batch ,PyTorch accumulates by default
+            self.optimizer.zero_grad()
+            #Forward pass — model makes predictions
+            predictions = self.model(batch_X)
+            #Calculate how wrong it was
+            loss = self.criterion(predictions, batch_y)
+            #Backward pass — compute gradients
+            loss.backward()
+            #Update weights based on gradients
+            self.optimizer.step()
+            #Track loss for logging ,multiply by batch size for true average later
+            running_loss += loss.item() * batch_X.size(0)
+        return running_loss / len(self.train_loader.dataset)
+
+    def validate(self):
+        """Evaluates the model on the validation set."""
+        #Disables dropout
+        self.model.eval()
+        # torch.no_grad() = don't track gradients — faster and saves memory
+        with torch.no_grad():
+            val_predictions = self.model(self.X_val)
+            val_loss = self.criterion(val_predictions, self.y_val).item()
+        return val_loss
+
+    def fit(self):
+        """Runs the full training loop over all epochs."""
+        print(f"\nStarting training for {self.epochs} epochs...\n")
+
+        for epoch in range(self.epochs):
+            train_loss = self.train_one_epoch()
+            val_loss = self.validate()
+
+            # Save loss history for plotting later
+            self.history["train_loss"].append(train_loss)
+            self.history["val_loss"].append(val_loss)
+
+            print(f"Epoch [{epoch+1}/{self.epochs}]  "
+                  f"Train Loss: {train_loss:.6f}  "
+                  f"Val Loss: {val_loss:.6f}")
+
+    def save(self):
+        """Saves the trained model, scaler, and config to disk."""
+        # Make sure the models/ folder exists
+        os.makedirs(os.path.dirname(self.model_save_path), exist_ok = True)
+        torch.save({
+            "model_state_dict": self.model.state_dict(),
+            "scaler": self.scaler,
+            "config": {
+                "input_size": 1,
+                "hidden_size": self.hidden_size,
+                "num_layers": self.num_layers,
+                "dropout": self.dropout,
+                "sequence_length": self.sequence_length,
+                "ticker": self.ticker
+            }
+        }, self.model_save_path)
+        print(f"\nModel saved to {self.model_save_path}")
+
+    def run(self):
+        """Convenience method that runs the entire pipeline in one call."""
+        self.prepare_data()
+        self.build()
+        self.fit()
+        self.save()
+
+if __name__ == "__main__":
+    # Train a model on Apple stock with default settings
+    trainer = Trainer(ticker = "AAPL", epochs = 20)
+    trainer.run()
