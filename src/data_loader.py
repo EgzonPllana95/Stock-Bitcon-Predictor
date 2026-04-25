@@ -18,11 +18,10 @@ class DataLoader:
                  sequence_length = 60):
         """
         Sets up a DataLoader for one stock or crypto.
-
-        ticker: Yahoo Finance symbol (e.g. "AAPL", "BTC-USD", "VOLV-B.ST")
-        start_date: Where to start the data, format "YYYY-MM-DD"
-        end_date: Where to stop. If None, today's date is used.
-        sequence_length: How many days of history the model looks at (60 = ~3 months)
+            - ticker: Yahoo Finance symbol (e.g. "AAPL", "BTC-USD", "VOLV-B.ST")
+            - start_date: Where to start the data, format "YYYY-MM-DD"
+            - end_date: Where to stop. If None, today's date is used.
+            - sequence_length: How many days of history the model looks at (60 = ~3 months)
         """
         #Uses todays date if a end_date is not given
         if end_date is None:
@@ -38,3 +37,23 @@ class DataLoader:
         self.scaler = None
         #Scaled to 0,1
         self.scaled_prices = None
+
+    def fetch(self):
+        """Downloads historical price data from Yahoo Finance that returns with pandas Dataframe"""
+        print(f"Fetching {self.ticker} from {self.start_date} to {self.end_date}...")
+        #yf (YahooFinance) downloads and returns a pandas Dataframe
+        df = yf.download(
+            self.ticker,
+            start = self.start_date,
+            end = self.end_date,
+            #Hides the progressing bar for a more cleaner output
+            progress = False
+        )
+        #Validation for the ticker if its valid or not
+        if df.empty:
+            raise ValueError(f"No data found for ticker {self.ticker}! Be sure to typ the correct symbol")
+        self.raw_data = df
+        print(f"Donloaded {len(df)} days of data")
+        return df
+    
+    
