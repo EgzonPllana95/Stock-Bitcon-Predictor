@@ -73,4 +73,25 @@ class DataLoader:
         self.scale_prices = self.scaler.fit_transform(prices)
         return self.scaled_prices
     
+    def create_sequences(self):
+        """
+        Creates sliding window sequences for LSTM traning
+        X = prices from day (N) to day (N+59)
+        y = price on day (N+60) 
+        """
+        #Validation that the price is scaled first
+        if self.scaled_prices is None:
+            raise RuntimeError("Call scale_prices() before create_sequences().")
+        X, y = list(), list()
+        #Slides a window across the data that starts att sequences_length
+        for i in range(self.sequence_length, len(self.scale_prices)):
+            #Takes previous 60 days
+            X.append(self.scaled_prices[i - self.sequence_length])
+            #Targeted one is the price on day [i], after the window
+            y.append(self.scaled_prices[i])
+        #Convertingthe X, y to arrays, needed for Pytorch
+        X = np.array(X)
+        y = np.array(y)
+        print(f"Created {len(X)} sequences of length {self.sequence_length}")
+    
     
