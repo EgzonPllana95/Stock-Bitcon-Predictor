@@ -52,3 +52,32 @@ class Trainer:
         self.model = None
         self.history = {"train_loss": [], "val_loss": []}
         print(f"Trainer initialized. Using device: {self.device}")
+
+    def prepare_data(self):
+        """Prepares stock data and creates train/validations sets"""
+        #Uses Dataloader class för fetch, sacle and create sequences
+        loader = DataLoader(
+            ticker=self.ticker,
+            start_date=self.start_date,
+            end_date=self.end_date,
+            sequence_length=self.sequence_length
+        )
+        X, y = loader.run()
+        #Saves the scaler for later perpess
+        self.scaler = loader.scaler
+        #Spliting the traning to 80% traning and 20% validation
+        split_idx = int(len(X) * 0.8)
+        X_train, X_val = X[:split_idx], X[split_idx:]
+        y_train, y_val = y[:split_idx], y[split_idx:]
+        #Converting them to arrays with numpy because of PyTorch
+        X_train = torch.FloatTensor(X_train).to(self.device)
+        y_train = torch.FloatTensor(y_train).to(self.device)
+        X_val = torch.FloatTensor(X_val).to(self.device)
+        y_val = torch.FloatTensor(y_val).to(self.device)
+        #Handels batching and shuffling during traning
+        train_dataset = TensorDataset(X_train, y_train)
+        self.train_loader = TorchDataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
+        #Validation on data
+        self.X_val = X_val
+        self.y_val = y_val
+        print(f"Train: {len(X_train)} sequences | Val: {len(X_val)} sequences")
