@@ -132,6 +132,29 @@ class TickerRegistry:
         except Exception:
             return False
 
+    @staticmethod
+    def search_yahoo(query: str, max_results: int = 5) -> dict:
+        """
+        Searches Yahoo Finance directly for any stock or crypto.
+        Returns a dict mapping "Name (Exchange)" → ticker symbol.
+        Useful when the local registry doesn't have what the user is looking for.
+        """
+        import yfinance as yf
+        try:
+            #Yahoo's built-in search — same one as on their website
+            search = yf.Search(query, max_results=max_results)
+            results = dict()
+            for quote in search.quotes:
+                symbol = quote.get("symbol", "")
+                name = quote.get("shortname") or quote.get("longname") or symbol
+                exchange = quote.get("exchange", "")
+                #Build a readable label
+                label = f"{name} ({exchange})" if exchange else name
+                results[label] = symbol
+            return results
+        except Exception:
+            return dict()
+
     def __len__(self) -> int:
         """Lets you use len(registry) to get the total number of tickers."""
         return sum(len(tickers) for tickers in self.tickers.values())
@@ -139,7 +162,6 @@ class TickerRegistry:
     def __repr__(self) -> str:
         """Controls what gets printed when you do print(registry). Useful for debugging."""
         return f"TickerRegistry(categories = {len(self.tickers)}, total_tickers = {len(self)})"
-
 
 if __name__ == "__main__":
     # Quick test — run with: python src/tickers.py
