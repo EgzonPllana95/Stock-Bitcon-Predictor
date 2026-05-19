@@ -105,7 +105,49 @@ def fetch_history(ticker, days=365):
     return df
 
 
-def plot_prices(df, predictions=None, ticker=""):
+def get_currency_symbol(ticker):
+    """
+    Frågar yfinance vilken valuta tickern handlas i och returnerar
+    rätt symbol. Faller tillbaka på själva valutakoden om symbolen
+    är okänd, och på tom sträng om yfinance inte vet (då visas bara
+    siffran utan symbol — bättre än en FELAKTIG symbol).
+
+    Detta löser felet där svenska aktier (t.ex. SWED-A.ST, priser i
+    SEK) visades med "$" framför, vilket är fel valuta på rätt siffra.
+    """
+    import yfinance as yf
+    try:
+        info = yf.Ticker(ticker).info
+        code = info.get("currency", "")
+    except Exception:
+        code = ""
+
+    symbols = {
+        "USD": "$",
+        "SEK": "kr",
+        "EUR": "€",
+        "GBP": "£",
+        "NOK": "kr",
+        "DKK": "kr",
+    }
+    # Saknas koden i tabellen: visa koden som text (t.ex. "327.70 SEK")
+    # — korrekt om än mindre snyggt. Hellre sant än vilseledande.
+    return symbols.get(code, (code + " ") if code else "")
+
+
+def fmt_price(value, symbol):
+    """
+    Formaterar ett pris med rätt valutasymbol. För symboler som
+    står EFTER beloppet i svensk konvention (kr) sätter vi den
+    efter; för $/€/£ före. Detta är bara kosmetik — siffran är
+    densamma oavsett.
+    """
+    if symbol in ("kr", "kr "):
+        return f"{value:.2f} kr"
+    return f"{symbol}{value:.2f}"
+
+
+def plot_prices(df, predictions=None, ticker="", currency_label="USD"):
     """Builds a Plotly chart with historical prices and (optional) predictions."""
     fig = go.Figure()
 
@@ -134,7 +176,8 @@ def plot_prices(df, predictions=None, ticker=""):
     fig.update_layout(
         title=f"{ticker} — Price History" + (" + Forecast" if predictions is not None else ""),
         xaxis_title="Date",
-        yaxis_title="Price (USD)",
+        # Y-axeln visar nu RÄTT valuta i stället för hårdkodat "USD".
+        yaxis_title=f"Price ({currency_label})",
         height=500,
         hovermode="x unified",
         template="plotly_white"
@@ -168,11 +211,8 @@ def get_or_train_model(ticker):
 
 
 # --- Session state init ---
-# ÄNDRING 1: Initiera minnesnycklar EN gång. Detta körs vid varje
-# omkörning, men 'if ... not in' gör att vi bara sätter dem första
-# gången — annars skulle vi nollställa minnet vid varje klick.
-# session_state överlever Streamlits omkörningar; vanliga variabler
-# gör det inte. Det är det som löser att grafen/AI-svaret försvann.
+# Initiera minnesnycklar EN gång. 'if ... not in' gör att vi bara
+# sätter dem första gången — annars nollställs minnet vid varje klick.
 if "forecast" not in st.session_state:
     st.session_state.forecast = None
 if "forecast_ticker" not in st.session_state:
@@ -193,38 +233,67 @@ if ticker is None:
 # Show selected ticker
 st.subheader(f"Selected: {ticker}")
 
+# Hämta valutan EN gång för den här tickern. Används både för
+# metrikerna, grafens y-axel och prognos-siffrorna nedan.
+import yfinance as yf
+try:
+    _currency_code = yf.Ticker(ticker).info.get("currency", "") or "USD"
+except Exception:
+    _currency_code = "USD"
+currency_symbol = get_currency_symbol(ticker)
+
+# --- Run prediction when user clicks the button ---
+# Själva BERÄKNINGEN ligger kvar i knapp-blocket. VISNINGEN sker
+# utifrån session_state längre ner så den överlever omkörningar.
+if predict_button:
+    try:
+        # Get or train the model (silent — user just sees a single spinner)
+        model_path = get_or_train_model(ticker)
+
+        # Make predictions
+        with st.spinner("Generating forecast..."):
+            predictor = Predictor(model_path=model_path)
+            forecast = predictor.predict_multi_day(days=forecast_days, ticker=ticker)
+
+        st.session_state.forecast = forecast
+        st.session_state.forecast_ticker = ticker
+        st.session_state.forecast_days_used = forecast_days
+
+    except Exception as e:
+        st.error(f"Forecast failed: {e}")
+
+# Finns en giltig sparad prognos för PRECIS den ticker som visas nu?
+has_forecast = (
+    st.session_state.forecast is not None
+    and st.session_state.forecast_ticker == ticker
+)
+
 # Always show the historical chart
 try:
     df = fetch_history(ticker, days=365)
 
-    # Price metrics
+    # Price metrics — nu med RÄTT valutasymbol via fmt_price().
     col1, col2, col3 = st.columns(3)
-    col1.metric("Latest Price", f"${df['Close'].iloc[-1].item():.2f}")
-    col2.metric("365-day High", f"${df['Close'].max().item():.2f}")
-    col3.metric("365-day Low", f"${df['Close'].min().item():.2f}")
+    col1.metric("Latest Price", fmt_price(df['Close'].iloc[-1].item(), currency_symbol))
+    col2.metric("365-day High", fmt_price(df['Close'].max().item(), currency_symbol))
+    col3.metric("365-day Low", fmt_price(df['Close'].min().item(), currency_symbol))
 
-    # ÄNDRING 3: Rita grafen utifrån MINNET, inte utifrån knappen.
-    # Om det finns en sparad prognos för PRECIS den här tickern,
-    # rita med prognos — annars bara historik. Ticker-kontrollen
-    # hindrar att en gammal prognos för t.ex. AAPL ritas ovanpå
-    # BTC-USD efter att användaren bytt aktie.
+    # Rita grafen utifrån MINNET, inte utifrån knappen.
     chart_placeholder = st.empty()
 
-    if (
-        st.session_state.forecast is not None
-        and st.session_state.forecast_ticker == ticker
-    ):
+    if has_forecast:
         chart_placeholder.plotly_chart(
             plot_prices(
                 df,
                 predictions=st.session_state.forecast,
                 ticker=ticker,
+                currency_label=_currency_code,
             ),
             use_container_width=True,
         )
     else:
         chart_placeholder.plotly_chart(
-            plot_prices(df, ticker=ticker),
+            plot_prices(df, ticker=ticker, currency_label=_currency_code),
             use_container_width=True,
         )
 
@@ -233,51 +302,82 @@ except Exception as e:
     st.stop()
 
 
+# --- Forecast metrics + table ---
+# Ritas utifrån session_state, så det överlever omkörningar precis
+# som grafen.
+if has_forecast:
+    forecast = st.session_state.forecast
+    days_used = st.session_state.forecast_days_used
+
+    # Show forecast metrics
+    st.subheader(f"📊 {days_used}-Day Forecast")
+
+    col1, col2, col3 = st.columns(3)
+    last_price = df["Close"].iloc[-1].item()
+    next_price = forecast[0]
+    change_pct = ((next_price - last_price) / last_price) * 100
+
+    col1.metric("Current Price", fmt_price(last_price, currency_symbol))
+    col2.metric(
+        "Tomorrow's Prediction",
+        fmt_price(next_price, currency_symbol),
+        delta=f"{change_pct:+.2f}%",
+    )
+    col3.metric(
+        f"Day +{days_used} Prediction",
+        fmt_price(forecast[-1], currency_symbol),
+    )
+
+    # Forecast table — samma valutasymbol i tabellen.
+    forecast_df = pd.DataFrame({
+        "Day": [f"+{i+1}" for i in range(len(forecast))],
+        "Predicted Price": [fmt_price(p, currency_symbol) for p in forecast]
+    })
+    st.dataframe(forecast_df, use_container_width=True, hide_index=True)
+
+    # Disclaimer
+    st.info("""
+    **Disclaimer:** Stock prices are influenced by many factors not captured in
+    historical price data alone (news, earnings, market sentiment, etc).
+    These predictions are for educational purposes — not financial advice.
+    """)
+
+
 # --- Nyheter + AI-bedömning ---
 # Ligger efter grafen så df garanterat finns (annars har koden
 # redan kört st.stop() ovan).
 
 st.subheader("Senaste nyheter")
 
-# Samma 'ticker' som användaren valt i sidebaren.
 news = fetch_news(ticker)
 
 if not news:
     st.info("Inga nyheter hittades för denna ticker.")
 else:
     for n in news:
-        # Klickbar rubrik + källa under den.
         st.markdown(
             f"**[{n['title']}]({n['link']})**  \n_{n['publisher']}_"
         )
 
 st.subheader("AI-bedömning")
 
-# Radio = användaren kan bara välja giltiga alternativ (inga stavfel).
 language = st.radio(
     "Språk för bedömning",
     options=["Svenska", "English"],
     horizontal=True,
 )
 
-# Översätt UI-texten till kodens språkkod ("sv"/"en").
 lang_code = "en" if language == "English" else "sv"
 
 # Knapp så att Gemini bara anropas på begäran (varje anrop kostar kvot).
-# Vi SPARAR svaret i session_state istället för att skriva ut det
-# direkt — annars försvinner AI-texten nästa gång scriptet körs om
-# (t.ex. när "Show Forecast" trycks).
+# Svaret sparas i session_state så det överlever omkörningar.
 if st.button("Generera AI-bedömning"):
     with st.spinner("Analyserar..."):
-        # .values.flatten().tolist() — samma mönster som plot_prices
-        # använder, eftersom Close-kolumnen är tvådimensionell.
         recent_prices = df["Close"].tail(30).values.flatten().tolist()
         st.session_state.advice = get_recommendation(
             ticker, news, recent_prices, language=lang_code
         )
 
-# Visa sparat AI-svar UTANFÖR if-satsen, så det överlever
-# omkörningar precis som grafen.
 if st.session_state.advice:
     st.text(st.session_state.advice)
 
@@ -292,60 +392,6 @@ else:
         "AI-genererade bedömningar är "
         "INTE finansiell rådgivning och ska inte användas för investeringsbeslut."
     )
-
-
-# --- Run prediction when user clicks the button ---
-if predict_button:
-    try:
-        # Get or train the model (silent — user just sees a single spinner)
-        model_path = get_or_train_model(ticker)
-
-        # Make predictions
-        with st.spinner("Generating forecast..."):
-            predictor = Predictor(model_path=model_path)
-            forecast = predictor.predict_multi_day(days=forecast_days, ticker=ticker)
-
-        # ÄNDRING 2: Spara prognosen i minnet istället för att rita
-        # direkt här. Grafen ritas på ETT ställe (ovan, utifrån
-        # minnet), så den överlever framtida omkörningar.
-        # Spara prognosen i minnet.
-        st.session_state.forecast = forecast
-        st.session_state.forecast_ticker = ticker
-        st.session_state.forecast_days_used = forecast_days
-
-        # Kör om scriptet EN gång. Då ritas grafen högst upp på nytt,
-        # och eftersom prognosen nu ligger i session_state ritas den
-        # MED prognoslinjen. Vi slipper rita om chart_placeholder på
-        # distans, vilket var det som inte tog tillförlitligt.
-        st.rerun()
-        # Show forecast metrics
-        st.subheader(f"📊 {forecast_days}-Day Forecast")
-
-        col1, col2, col3 = st.columns(3)
-        last_price = df["Close"].iloc[-1].item()
-        next_price = forecast[0]
-        change_pct = ((next_price - last_price) / last_price) * 100
-
-        col1.metric("Current Price", f"${last_price:.2f}")
-        col2.metric("Tomorrow's Prediction", f"${next_price:.2f}", delta=f"{change_pct:+.2f}%")
-        col3.metric(f"Day +{forecast_days} Prediction", f"${forecast[-1]:.2f}")
-
-        # Forecast table
-        forecast_df = pd.DataFrame({
-            "Day": [f"+{i+1}" for i in range(len(forecast))],
-            "Predicted Price": [f"${p:.2f}" for p in forecast]
-        })
-        st.dataframe(forecast_df, use_container_width=True, hide_index=True)
-
-        # Disclaimer
-        st.info("""
-        **Disclaimer:** Stock prices are influenced by many factors not captured in
-        historical price data alone (news, earnings, market sentiment, etc).
-        These predictions are for educational purposes — not financial advice.
-        """)
-
-    except Exception as e:
-        st.error(f"Forecast failed: {e}")
 
 
 # --- Footer ---

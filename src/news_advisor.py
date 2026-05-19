@@ -1,8 +1,12 @@
+# src/news_advisor.py
+
 import os
+import time
 import yfinance as yf
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
+from google import genai                  # NYTT paket: google-genai
+from google.genai import types            # för generation-inställningar
+from google.genai import errors as genai_errors   # för att fånga serverfel
 
 load_dotenv()
 
@@ -62,13 +66,17 @@ def get_recommendation(
     """
     Skickar nyheter + prisrörelse till Gemini och ber om en
     strukturerad bedömning. Returnerar svaret som text.
+
+    Vid tillfälligt serverfel (t.ex. 503, Gemini överbelastad)
+    görs upp till 3 försök med växande väntetid. Misslyckas alla
+    returneras ett begripligt meddelande istället för att appen
+    kraschar.
     """
     api_key = os.environ.get("API_KEY")
     if not api_key:
         return "FEL: API_KEY saknas i .env-filen."
 
-    # NYTT: i google-genai skapar man en Client med nyckeln.
-    # (I gamla paketet hette det genai.configure() — nu en klient.)
+    # I google-genai skapar man en Client med nyckeln.
     client = genai.Client(api_key=api_key)
 
     # news_text och price_text byggs EXAKT som förut.
@@ -119,16 +127,36 @@ def get_recommendation(
         f"Ge din bedömning enligt formatet."
     )
 
-    # NYTT: det nya paketet HAR ett separat system-fält igen
-    # (via config), så vi behöver inte slå ihop som i det gamla.
-    response = client.models.generate_content(
-        model="gemini-2.5-flash-lite",   # från din list_models-körning
-        contents=user_message,
-        config=types.GenerateContentConfig(
-            system_instruction=system_prompt,
-            max_output_tokens=1000,
-        ),
-    )
+    # Försök anropet upp till 3 gånger. Ett 503 (server överbelastad)
+    # är oftast borta inom några sekunder, så vi väntar lite längre
+    # för varje försök: 2s, sedan 4s. Det kallas "backoff".
+    last_error = None
+    for attempt in range(3):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash-lite",
+                contents=user_message,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    max_output_tokens=1000,
+                ),
+            )
+            # Lyckades — returnera direkt och hoppa ur loopen.
+            return response.text
 
-    # Svaret ligger fortfarande i .text — samma som förut.
-    return response.text
+        except genai_errors.ServerError as e:
+            # Servern var tillfälligt otillgänglig (t.ex. 503).
+            # Spara felet, vänta, och försök igen. Vi fångar BARA
+            # ServerError — andra fel (t.ex. fel modellnamn) ska
+            # synas direkt, inte tyst försökas om 3 gånger.
+            last_error = e
+            if attempt < 2:                    # vänta inte efter sista försöket
+                time.sleep(2 * (attempt + 1))  # 2s, sedan 4s
+
+    # Kom hit = alla 3 försök misslyckades. Krascha INTE appen —
+    # returnera ett begripligt meddelande som UI:t visar snyggt.
+    return (
+        "Gemini är tillfälligt överbelastad och svarade inte efter "
+        "flera försök. Det är ett serverfel hos Google, inte ett fel "
+        "i appen. Försök igen om en liten stund."
+    )
