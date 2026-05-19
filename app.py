@@ -1,12 +1,3 @@
-"""
-Streamlit dashboard for the Stock & Crypto Predictor.
-
-Lets users:
-    - Search for any stock or crypto by name or ticker (powered by Yahoo Finance)
-    - Choose how many days to forecast
-    - See predictions on an interactive Plotly chart
-"""
-
 import streamlit as st
 import plotly.graph_objects as go
 import pandas as pd
@@ -20,6 +11,7 @@ from data_loader import DataLoader
 from train import Trainer
 from predict import Predictor
 from tickers import TickerRegistry
+from news_advisor import fetch_news, get_recommendation
 
 
 # --- Page setup ---
@@ -175,6 +167,22 @@ def get_or_train_model(ticker):
     return model_path
 
 
+# --- Session state init ---
+# ÄNDRING 1: Initiera minnesnycklar EN gång. Detta körs vid varje
+# omkörning, men 'if ... not in' gör att vi bara sätter dem första
+# gången — annars skulle vi nollställa minnet vid varje klick.
+# session_state överlever Streamlits omkörningar; vanliga variabler
+# gör det inte. Det är det som löser att grafen/AI-svaret försvann.
+if "forecast" not in st.session_state:
+    st.session_state.forecast = None
+if "forecast_ticker" not in st.session_state:
+    st.session_state.forecast_ticker = None
+if "forecast_days_used" not in st.session_state:
+    st.session_state.forecast_days_used = None
+if "advice" not in st.session_state:
+    st.session_state.advice = None
+
+
 # --- Main area ---
 
 # Stop early if no valid ticker
@@ -195,13 +203,95 @@ try:
     col2.metric("365-day High", f"${df['Close'].max().item():.2f}")
     col3.metric("365-day Low", f"${df['Close'].min().item():.2f}")
 
-    # Show the chart (will update with predictions later if user clicks the button)
+    # ÄNDRING 3: Rita grafen utifrån MINNET, inte utifrån knappen.
+    # Om det finns en sparad prognos för PRECIS den här tickern,
+    # rita med prognos — annars bara historik. Ticker-kontrollen
+    # hindrar att en gammal prognos för t.ex. AAPL ritas ovanpå
+    # BTC-USD efter att användaren bytt aktie.
     chart_placeholder = st.empty()
-    chart_placeholder.plotly_chart(plot_prices(df, ticker=ticker), use_container_width=True)
+
+    if (
+        st.session_state.forecast is not None
+        and st.session_state.forecast_ticker == ticker
+    ):
+        chart_placeholder.plotly_chart(
+            plot_prices(
+                df,
+                predictions=st.session_state.forecast,
+                ticker=ticker,
+            ),
+            use_container_width=True,
+        )
+    else:
+        chart_placeholder.plotly_chart(
+            plot_prices(df, ticker=ticker),
+            use_container_width=True,
+        )
 
 except Exception as e:
     st.error(f"Could not fetch data for {ticker}: {e}")
     st.stop()
+
+
+# --- Nyheter + AI-bedömning ---
+# Ligger efter grafen så df garanterat finns (annars har koden
+# redan kört st.stop() ovan).
+
+st.subheader("Senaste nyheter")
+
+# Samma 'ticker' som användaren valt i sidebaren.
+news = fetch_news(ticker)
+
+if not news:
+    st.info("Inga nyheter hittades för denna ticker.")
+else:
+    for n in news:
+        # Klickbar rubrik + källa under den.
+        st.markdown(
+            f"**[{n['title']}]({n['link']})**  \n_{n['publisher']}_"
+        )
+
+st.subheader("AI-bedömning")
+
+# Radio = användaren kan bara välja giltiga alternativ (inga stavfel).
+language = st.radio(
+    "Språk för bedömning",
+    options=["Svenska", "English"],
+    horizontal=True,
+)
+
+# Översätt UI-texten till kodens språkkod ("sv"/"en").
+lang_code = "en" if language == "English" else "sv"
+
+# Knapp så att Gemini bara anropas på begäran (varje anrop kostar kvot).
+# Vi SPARAR svaret i session_state istället för att skriva ut det
+# direkt — annars försvinner AI-texten nästa gång scriptet körs om
+# (t.ex. när "Show Forecast" trycks).
+if st.button("Generera AI-bedömning"):
+    with st.spinner("Analyserar..."):
+        # .values.flatten().tolist() — samma mönster som plot_prices
+        # använder, eftersom Close-kolumnen är tvådimensionell.
+        recent_prices = df["Close"].tail(30).values.flatten().tolist()
+        st.session_state.advice = get_recommendation(
+            ticker, news, recent_prices, language=lang_code
+        )
+
+# Visa sparat AI-svar UTANFÖR if-satsen, så det överlever
+# omkörningar precis som grafen.
+if st.session_state.advice:
+    st.text(st.session_state.advice)
+
+# Disclaimer — byter språk så hela UI:t är konsekvent.
+if lang_code == "en":
+    st.warning(
+        "AI-generated assessments are "
+        "NOT financial advice and must not be used for investment decisions."
+    )
+else:
+    st.warning(
+        "AI-genererade bedömningar är "
+        "INTE finansiell rådgivning och ska inte användas för investeringsbeslut."
+    )
 
 
 # --- Run prediction when user clicks the button ---
@@ -215,9 +305,19 @@ if predict_button:
             predictor = Predictor(model_path=model_path)
             forecast = predictor.predict_multi_day(days=forecast_days, ticker=ticker)
 
-        # Update the chart with predictions
-        chart_placeholder.plotly_chart(plot_prices(df, predictions=forecast, ticker=ticker), use_container_width=True)
+        # ÄNDRING 2: Spara prognosen i minnet istället för att rita
+        # direkt här. Grafen ritas på ETT ställe (ovan, utifrån
+        # minnet), så den överlever framtida omkörningar.
+        # Spara prognosen i minnet.
+        st.session_state.forecast = forecast
+        st.session_state.forecast_ticker = ticker
+        st.session_state.forecast_days_used = forecast_days
 
+        # Kör om scriptet EN gång. Då ritas grafen högst upp på nytt,
+        # och eftersom prognosen nu ligger i session_state ritas den
+        # MED prognoslinjen. Vi slipper rita om chart_placeholder på
+        # distans, vilket var det som inte tog tillförlitligt.
+        st.rerun()
         # Show forecast metrics
         st.subheader(f"📊 {forecast_days}-Day Forecast")
 
