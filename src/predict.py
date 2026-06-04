@@ -36,7 +36,7 @@ class Predictor:
         self.model.load_state_dict(checkpoint["model_state_dict"])
         #Setting it to evaluation mode nad disables dropout for consistent predictions
         self.model.eval()
-        print(f"Loaded model trained on {self.config["ticker"]}")
+        print(f"Loaded model trained on {self.config['ticker']}")
     
     def get_latest_sequence(self, ticker = None):
         """
